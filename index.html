@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>فرع رشاشات الحريق 3D</title>
+<style>
+:root{--bg:#10141a;--card:#1a212b;--tx:#e8edf3;--mut:#8b97a6;--ac:#ff6b4a;--bd:#2b3544;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f3f5f8;--card:#fff;--tx:#17202b;--mut:#5d6b7c;--bd:#d5dce5}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,"Segoe UI",Tahoma,sans-serif;padding:12px}
+h1{font-size:18px;margin:4px 0 12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px;margin-bottom:12px}
+#view{height:58vh;min-height:320px;border-radius:10px;overflow:hidden;position:relative;direction:ltr;touch-action:none}
+#view canvas{display:block;width:100%;height:100%}
+.hint{position:absolute;bottom:6px;right:8px;font-size:11px;color:#6b7785;pointer-events:none}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:4px;text-align:center}
+th{color:var(--mut);font-weight:500;font-size:12px}
+input,select,button{background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:7px;font:inherit;width:100%}
+input[type=number]{min-width:56px;width:70px}
+input[type=checkbox]{width:auto}
+button{width:auto;cursor:pointer}
+.pri{background:var(--ac);border-color:var(--ac);color:#fff}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.det{display:flex;gap:6px;align-items:center;justify-content:center;flex-wrap:wrap}
+.det select{width:auto}
+.sm button{padding:4px 8px}
+#tot td{border-bottom:1px solid var(--bd)}
+.p{background:rgba(74,163,255,.16)}.t{background:rgba(80,200,120,.16)}.e{background:rgba(190,100,220,.16)}.r{background:rgba(255,150,90,.18)}.s{background:rgba(255,70,70,.16)}.h{background:rgba(150,160,170,.18)}
+</style>
+</head>
+<body>
+<h1>🔥 فرع رشاشات الحريق – 3D</h1>
+
+<div class="card">
+<div id="view"></div>
+<div class="row">
+<button class="pri" onclick="fit(V(1,1,1))">أيزو</button>
+<button onclick="fit(V(0,1,.001))">من فوق</button>
+<button onclick="fit(V(0,0,1))">من الأمام</button>
+<button onclick="fit(V(1,0,0))">من الجنب</button>
+<label style="font-size:13px"><input type="checkbox" id="lb" checked onchange="build()"> مقاسات</label>
+<label style="font-size:13px">طول التيش <input type="number" id="ceil" value="0.5" step="0.1" min="0.2" onchange="build()"> م</label>
+<button onclick="shot()">تحميل صورة</button>
+<button onclick="resetDef()">الوضع الافتراضي</button>
+</div></div>
+
+<div class="card scroll">
+<div class="row sm" style="margin:0 0 8px">
+<button class="pri" onclick="addI('pipe')">+ ماسورة</button>
+<button class="pri" onclick="addI('tee')">+ تيه</button>
+<button class="pri" onclick="addI('red')">+ مسلوب</button>
+<button class="pri" onclick="addI('elb')">+ كوع</button>
+<button class="pri" onclick="addI('spr')">+ رشاش</button>
+</div>
+<table><thead><tr><th>#</th><th>النوع</th><th>المقاس</th><th>تفاصيل</th><th></th></tr></thead>
+<tbody id="tb"></tbody></table>
+<div style="font-size:12px;color:var(--mut);margin-top:8px">الترتيب من الرشاش الأخير لحد التغذية. الأفيز بيتحرك بالسحب على الماسورة نفسها في الرسمة.</div>
+</div>
+
+<div class="card scroll"><div id="tot"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+const V=(x,y,z)=>new THREE.Vector3(x,y,z);
+const DIR={px:V(1,0,0),nx:V(-1,0,0),pz:V(0,0,1),nz:V(0,0,-1),py:V(0,1,0),ny:V(0,-1,0)};
+const DN={px:'يمين ↘',nx:'شمال ↖',pz:'أمام ↙',nz:'خلف ↗',py:'لفوق ↑',ny:'لتحت ↓'};
+const SZ={'½':21.3,'¾':26.7,'1':33.4,'1¼':42.2,'1½':48.3,'2':60.3,'2½':73,'3':88.9};
+const KEYS=Object.keys(SZ),EX=2.2,rr=d=>SZ[d]/2000*EX;
+const HS=[[],[.5],[.2,.8],[.15,.5,.85]];
+const pipe=(d,l)=>({t:'pipe',d,l,h:[.5]}),tee=d=>({t:'tee',d,br:'up'}),red=(d,to)=>({t:'red',d,to}),elb=(d,dir,a)=>({t:'elb',d,dir,a:a||90});
+const DEF=()=>[{t:'spr',d:'½',u:'up'},elb('1','px'),pipe('1',3),tee('1'),pipe('1',3),red('1','1¼'),pipe('1¼',3),tee('1¼'),
+ red('1¼','1½'),pipe('1½',3),tee('1½'),pipe('1½',3),tee('1½'),red('1½','2'),pipe('2',3),tee('2'),pipe('2',1.9),tee('2'),elb('2','py',45),pipe('2',.4)];
+let S=DEF();
+try{const x=localStorage.getItem('pipeS5');if(x)S=JSON.parse(x)}catch(e){}
+const save=()=>{try{localStorage.setItem('pipeS5',JSON.stringify(S))}catch(e){}};
+
+/* scene */
+const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+const box=document.getElementById('view');
+const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.outputEncoding=THREE.sRGBEncoding;
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+box.appendChild(renderer.domElement);
+const hint=document.createElement('div');hint.className='hint';hint.textContent='اسحب للتدوير · قرّص للتقريب · اسحب الأفيز لتحريكه';box.appendChild(hint);
+const scene=new THREE.Scene();scene.background=new THREE.Color(dark?0x1d2530:0xe4eaf1);
+(function(){const c=document.createElement('canvas');c.width=512;c.height=256;const x=c.getContext('2d');
+ const g=x.createLinearGradient(0,0,0,256);g.addColorStop(0,'#ffffff');g.addColorStop(.5,'#cfd8e3');g.addColorStop(1,'#59626e');x.fillStyle=g;x.fillRect(0,0,512,256);
+ x.fillStyle='#fff';x.fillRect(60,40,90,40);x.fillRect(330,30,110,35);
+ const t=new THREE.CanvasTexture(c);t.mapping=THREE.EquirectangularReflectionMapping;t.encoding=THREE.sRGBEncoding;
+ scene.environment=new THREE.PMREMGenerator(renderer).fromEquirectangular(t).texture})();
+const cam=new THREE.OrthographicCamera(-5,5,5,-5,.1,200);
+const ctl=new THREE.OrbitControls(cam,renderer.domElement);ctl.enableDamping=true;
+scene.add(new THREE.HemisphereLight(0xffffff,dark?0x303a48:0x9aa7b8,.45));
+const sun=new THREE.DirectionalLight(0xffffff,.9);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.bias=-.0005;scene.add(sun,sun.target);
+const grp=new THREE.Group();scene.add(grp);
+let viewH=5,hg=[];
+
+const M=(c,m,r)=>new THREE.MeshStandardMaterial({color:c,metalness:m,roughness:r});
+const redM=M(0xd0211b,.3,.4),iron=M(0x30343a,.6,.45),rim=M(0x4a5058,.6,.4),brass=M(0xc9a227,.8,.3),zinc=M(0xb7bec6,.7,.35),steel=M(0xd5dae0,.75,.3),plate=M(0x6e747c,.4,.6);
+zinc.side=THREE.DoubleSide;
+const glass=new THREE.MeshStandardMaterial({color:0xff3b30,emissive:0x661100,metalness:.1,roughness:.2});
+
+function cyl(a,b,r1,r2,mat,add=true){
+ const d=b.clone().sub(a),len=d.length();if(len<1e-5)return;
+ const m=new THREE.Mesh(new THREE.CylinderGeometry(r2,r1,len,32),mat);
+ m.position.copy(a).add(b).multiplyScalar(.5);m.quaternion.setFromUnitVectors(V(0,1,0),d.normalize());
+ m.castShadow=m.receiveShadow=true;if(add)grp.add(m);return m;
+}
+const rimAt=(p,d,r)=>cyl(p.clone().addScaledVector(d,-r*.2),p.clone().addScaledVector(d,r*.2),r*1.42,r*1.42,rim);
+function spr(p,s){
+ const g=new THREE.Group();g.position.copy(p);
+ const add=m=>{m.castShadow=true;g.add(m)};
+ let m=new THREE.Mesh(new THREE.CylinderGeometry(.022,.022,.07,20),brass);m.position.y=s*.035;add(m);
+ [-1,1].forEach(x=>{const a=new THREE.Mesh(new THREE.CylinderGeometry(.004,.004,.1,8),brass);a.position.set(x*.024,s*.115,0);add(a)});
+ const df=new THREE.Mesh(new THREE.CylinderGeometry(.036,.03,.008,24),brass);df.position.y=s*.17;add(df);
+ const gb=new THREE.Mesh(new THREE.CylinderGeometry(.007,.007,.075,12),glass);gb.position.y=s*.1;add(gb);
+ grp.add(g);
+}
+function label(txt,p){
+ const c=document.createElement('canvas');c.width=300;c.height=72;const x=c.getContext('2d');
+ x.fillStyle='rgba(20,26,34,.82)';x.beginPath();x.roundRect?x.roundRect(2,2,296,68,16):x.rect(2,2,296,68);x.fill();
+ x.fillStyle='#fff';x.font='bold 34px Tahoma,Arial';x.textAlign='center';x.textBaseline='middle';x.fillText(txt,150,38);
+ const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),depthTest:false}));
+ sp.position.copy(p);sp.scale.set(.95,.23,1);sp.renderOrder=10;grp.add(sp);
+}
+function hanger(A,dir,L,f,r,hi,k,cl){
+ const g=new THREE.Group(),rb=r+.004,w=.045,top=rb+.035;
+ const add=(m,mat)=>{m.castShadow=m.receiveShadow=true;g.add(m);return m};
+ const band=add(new THREE.Mesh(new THREE.CylinderGeometry(rb,rb,w,32,1,true),zinc));band.rotation.z=Math.PI/2;
+ [-1,1].forEach(s=>{const e=add(new THREE.Mesh(new THREE.BoxGeometry(w,top,.006),zinc));e.position.set(0,top/2,s*(rb+.003))});
+ const bolt=add(new THREE.Mesh(new THREE.CylinderGeometry(.007,.007,2*rb+.03,12),steel));bolt.rotation.x=Math.PI/2;bolt.position.y=rb+.026;
+ [-1,1].forEach(s=>{const n=add(new THREE.Mesh(new THREE.CylinderGeometry(.012,.012,.012,6),steel));n.rotation.x=Math.PI/2;n.position.set(0,rb+.026,s*(rb+.02))});
+ const cn=add(new THREE.Mesh(new THREE.CylinderGeometry(.013,.013,.035,6),steel));cn.position.y=rb+.05;
+ const rod=add(new THREE.Mesh(new THREE.CylinderGeometry(.0085,.0085,cl-rb-.03,12),steel));rod.position.y=(cl+rb+.03)/2;
+ const pl=add(new THREE.Mesh(new THREE.BoxGeometry(.1,.012,.1),plate));pl.position.y=cl+.006;
+ const nt=add(new THREE.Mesh(new THREE.CylinderGeometry(.016,.016,.012,6),steel));nt.position.y=cl-.008;
+ const hb=new THREE.Mesh(new THREE.BoxGeometry(.18,cl,.18),new THREE.MeshBasicMaterial({visible:false}));hb.position.y=cl/2;g.add(hb);
+ g.rotation.y=Math.abs(dir.x)>.5?0:Math.PI/2;
+ g.position.copy(A).addScaledVector(dir,f*L);
+ g.userData={hanger:true,hi,k,A:A.clone(),dir:dir.clone(),L};
+ grp.add(g);hg.push(g);
+}
+
+function build(){
+ while(grp.children.length){const o=grp.children.pop();o.traverse(n=>{if(n.geometry)n.geometry.dispose()})}
+ hg=[];
+ const cl=Math.max(.2,+ceil.value||.5);
+ let P=V(0,0,0),dk=(S[0]&&S[0].t==='spr')?(S[0].u==='dn'?'py':'ny'):'px',dir=DIR[dk].clone();
+ const cnt={p:{},t:{},e:{},r:{},spr:0,h:0};
+ S.forEach((it,i)=>{
+  if(it.t==='spr'){
+   const sd=dir.clone().negate(),rb=rr('½');
+   cyl(P,P.clone().addScaledVector(sd,.035),rb*1.2,rb*1.2,iron);
+   spr(P.clone().addScaledVector(sd,.035),sd.y>0?1:-1);cnt.spr++;
+  }else if(it.t==='pipe'){
+   const r=rr(it.d),l=Math.max(+it.l||.1,.1),b=P.clone().addScaledVector(dir,l);
+   cyl(P,b,r,r,redM);
+   if(Math.abs(dir.y)<.5)(it.h||[]).forEach((f,k)=>{hanger(P,dir,l,f,r,i,k,cl);cnt.h++});
+   if(document.getElementById('lb').checked){const m=P.clone().add(b).multiplyScalar(.5);m.y-=r+.22;label(it.d+'" – '+l+'m',m)}
+   const key=it.d+'|'+l;cnt.p[key]=(cnt.p[key]||0)+1;P=b;
+  }else if(it.t==='tee'){
+   const r=rr(it.d),Lt=r*3.4,E=P.clone().addScaledVector(dir,Lt),rb=rr('½');
+   cyl(P,E,r*1.3,r*1.3,iron);rimAt(P.clone().addScaledVector(dir,r*.2),dir,r);rimAt(E.clone().addScaledVector(dir,-r*.2),dir,r);
+   const bd=Math.abs(dir.y)<.5?(it.br==='up'?DIR.py:DIR.ny):DIR.px,Mid=P.clone().addScaledVector(dir,Lt/2),T=Mid.clone().addScaledVector(bd,r*1.3+.045);
+   cyl(Mid,T,rb*1.5,rb*1.5,iron);cyl(T.clone().addScaledVector(bd,-rb*.3),T.clone().addScaledVector(bd,rb*.3),rb*1.75,rb*1.75,rim);
+   spr(T,bd.y>0?1:-1);cnt.spr++;
+   const key=it.d+' : ½';cnt.t[key]=(cnt.t[key]||0)+1;P=E;
+  }else if(it.t==='red'){
+   const rf=rr(it.d),rt=rr(it.to),L=Math.max(rf,rt)*3.6,E=P.clone().addScaledVector(dir,L);
+   cyl(P,E,rf*1.25,rt*1.25,iron);rimAt(P.clone().addScaledVector(dir,rf*.2),dir,rf*.9);rimAt(E.clone().addScaledVector(dir,-rt*.2),dir,rt*.9);
+   const a=KEYS.indexOf(it.d),b=KEYS.indexOf(it.to),key=KEYS[Math.max(a,b)]+' : '+KEYS[Math.min(a,b)];cnt.r[key]=(cnt.r[key]||0)+1;P=E;
+  }else if(it.t==='elb'){
+   const t0=DIR[it.dir];if(!t0)return;const nn=t0.clone().addScaledVector(dir,-t0.dot(dir));if(nn.length()<.01)return;nn.normalize();const th=(it.a===45?45:90)*Math.PI/180,nd=dir.clone().multiplyScalar(Math.cos(th)).addScaledVector(nn,Math.sin(th));
+   const r=rr(it.d),R=r*2.4,O=P.clone().addScaledVector(nn,R),a=nn.clone().multiplyScalar(-R),b=dir.clone().multiplyScalar(R),pts=[];
+   for(let k=0;k<=14;k++){const t=k/14*th;pts.push(O.clone().addScaledVector(a,Math.cos(t)).addScaledVector(b,Math.sin(t)))}
+   const tube=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),28,r*1.28,20),iron);tube.castShadow=true;grp.add(tube);
+   rimAt(pts[0].clone().addScaledVector(dir,r*.2),dir,r);rimAt(pts[14].clone().addScaledVector(nd,-r*.2),nd,r);
+   const key=it.d+((i>0&&S[i-1].t==='spr')?' : ½':'')+(it.a===45?' 45°':'');cnt.e[key]=(cnt.e[key]||0)+1;
+   P=pts[14].clone();dir=nd.clone();dk=Math.abs(nd.y)>.99?(nd.y>0?'py':'ny'):(Math.abs(nd.x)>.99?(nd.x>0?'px':'nx'):(Math.abs(nd.z)>.99?(nd.z>0?'pz':'nz'):'dg'));
+  }
+ });
+ lastD=(S.length&&S[S.length-1].t==='red')?S[S.length-1].to:(S.length?S[S.length-1].d:'1');lastDk=dk;
+ const bb=new THREE.Box3().setFromObject(grp),c=bb.getCenter(V(0,0,0)),R=bb.getSize(V(0,0,0)).length()/2||1;
+ sun.position.set(c.x+R*1.2,c.y+R*2.5,c.z+R*.8);sun.target.position.copy(c);
+ const sc=sun.shadow.camera;sc.left=-R*1.6;sc.right=R*1.6;sc.top=R*1.6;sc.bottom=-R*1.6;sc.near=.1;sc.far=R*8;sc.updateProjectionMatrix();
+ /* totals */
+ const sk=(a,b)=>KEYS.indexOf(b.split(/[ |]/)[0])-KEYS.indexOf(a.split(/[ |]/)[0]);
+ const rows=[];let tl=0;
+ Object.entries(cnt.p).sort((a,b)=>sk(a[0],b[0])||(+b[0].split('|')[1])-(+a[0].split('|')[1])).forEach(([k,n])=>{const[d,l]=k.split('|');tl+=n*l;rows.push(['p','ماسورة',d+'"',l,n])});
+ Object.entries(cnt.t).sort((a,b)=>sk(a[0],b[0])).forEach(([k,n])=>rows.push(['t','تيه',k.replace(/ : ½/,'" : ½"'),'-',n]));
+ Object.entries(cnt.e).sort((a,b)=>sk(a[0],b[0])).forEach(([k,n])=>rows.push(['e','كوع',k.replace(/ 45°/,'').replace(/^([^ ]+)( : ½)?$/,(m,a,b)=>a+'"'+(b?' : ½"':''))+(k.includes('45°')?' (45°)':''),'-',n]));
+ Object.entries(cnt.r).forEach(([k,n])=>rows.push(['r','مسلوب',k.replace(' : ','" : ')+'"','-',n]));
+ if(cnt.spr)rows.push(['s','رشاش','½"','-',cnt.spr]);
+ if(cnt.h)rows.push(['h','أفيز هنجر','-','-',cnt.h]);
+ tot.innerHTML='<table><thead><tr><th>الصنف</th><th>المقاس</th><th>الطول (م)</th><th>العدد</th></tr></thead>'+rows.map(r=>`<tr class="${r[0]}"><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td></tr>`).join('')+`</table><div style="margin-top:8px;font-size:13px">إجمالي طول المواسير: <b>${+tl.toFixed(2)}</b> م</div>`;
+ save();
+}
+let lastD='1',lastDk='px';
+
+/* camera */
+function sizeCam(){const w=box.clientWidth,h=box.clientHeight;renderer.setSize(w,h);const a=w/h;cam.left=-viewH*a;cam.right=viewH*a;cam.top=viewH;cam.bottom=-viewH;cam.updateProjectionMatrix()}
+function fit(dv){
+ const bb=new THREE.Box3().setFromObject(grp),c=bb.getCenter(V(0,0,0)),R=bb.getSize(V(0,0,0)).length()/2||1;
+ viewH=R*1.05;cam.zoom=1;cam.near=.1;cam.far=R*30;
+ cam.position.copy(c).addScaledVector(dv.clone().normalize(),R*5);ctl.target.copy(c);sizeCam();ctl.update();
+}
+function shot(){renderer.render(scene,cam);const a=document.createElement('a');a.href=renderer.domElement.toDataURL('image/png');a.download='branch.png';a.click()}
+addEventListener('resize',sizeCam);
+(function loop(){requestAnimationFrame(loop);ctl.update();renderer.render(scene,cam)})();
+
+/* drag hangers */
+const cv=renderer.domElement,ray=new THREE.Raycaster(),ndc=new THREE.Vector2();let drag=null;
+function rayFrom(x,y){const r=cv.getBoundingClientRect();ndc.set((x-r.left)/r.width*2-1,-(y-r.top)/r.height*2+1);ray.setFromCamera(ndc,cam)}
+function pickH(x,y){rayFrom(x,y);const h=ray.intersectObjects(hg,true)[0];if(!h)return null;let o=h.object;while(o&&!o.userData.hanger)o=o.parent;return o}
+['mousedown','touchstart'].forEach(ev=>box.addEventListener(ev,e=>{const t=e.touches?e.touches[0]:e;if(pickH(t.clientX,t.clientY))e.stopPropagation()},true));
+box.addEventListener('pointerdown',e=>{const o=pickH(e.clientX,e.clientY);if(o){e.stopPropagation();drag=o;ctl.enabled=false;try{cv.setPointerCapture(e.pointerId)}catch(_){}}},true);
+cv.addEventListener('pointermove',e=>{
+ if(drag){rayFrom(e.clientX,e.clientY);const u=drag.userData,w=u.A.clone().sub(ray.ray.origin),D=ray.ray.direction,b=u.dir.dot(D),d=u.dir.dot(w),ee=D.dot(w),den=1-b*b;
+  if(den>1e-4){const f=Math.min(.94,Math.max(.06,((b*ee-d)/den)/u.L));S[u.hi].h[u.k]=f;drag.position.copy(u.A).addScaledVector(u.dir,f*u.L)}
+ }else{cv.style.cursor=pickH(e.clientX,e.clientY)?'grab':'default'}
+});
+const endDrag=()=>{if(drag){drag=null;ctl.enabled=true;save()}};
+cv.addEventListener('pointerup',endDrag);cv.addEventListener('pointercancel',endDrag);
+
+/* table */
+const so=(sel)=>KEYS.map(k=>`<option value="${k}"${k==sel?' selected':''}>${k}"</option>`).join('');
+const TN={spr:'رشاش',pipe:'ماسورة',tee:'تيه',red:'مسلوب',elb:'كوع'};
+function det(it,i){
+ if(it.t==='pipe')return `<input type="number" step="0.1" value="${it.l}" onchange="S[${i}].l=+this.value;build()"> م · أفيز <select onchange="S[${i}].h=HS[+this.value].slice();build()">${[0,1,2,3].map(n=>`<option value="${n}"${(it.h||[]).length==n?' selected':''}>${n}</option>`).join('')}</select>`;
+ if(it.t==='tee')return `<select onchange="S[${i}].br=this.value;build()"><option value="dn"${it.br!='up'?' selected':''}>رشاش لتحت</option><option value="up"${it.br=='up'?' selected':''}>رشاش لفوق</option></select>`;
+ if(it.t==='red')return `إلى <select onchange="S[${i}].to=this.value;build()">${so(it.to)}</select>`;
+ if(it.t==='elb')return `<select onchange="S[${i}].a=+this.value;build()"><option value="90"${it.a!==45?' selected':''}>90°</option><option value="45"${it.a===45?' selected':''}>45°</option></select><select onchange="S[${i}].dir=this.value;build()">${Object.entries(DN).map(([k,v])=>`<option value="${k}"${k==it.dir?' selected':''}>${v}</option>`).join('')}</select>`;
+ if(it.t==='spr')return `<select onchange="S[${i}].u=this.value;build()"><option value="up"${it.u!=='dn'?' selected':''}>لفوق</option><option value="dn"${it.u==='dn'?' selected':''}>لتحت</option></select>`;
+ return '';
+}
+function tbl(){
+ tb.innerHTML=S.map((it,i)=>`<tr><td>${i+1}</td><td>${TN[it.t]}</td>
+ <td>${it.t==='spr'?'½"':`<select onchange="S[${i}].d=this.value;build()" style="width:auto">${so(it.d)}</select>`}</td>
+ <td><div class="det">${det(it,i)}</div></td>
+ <td class="sm" style="white-space:nowrap"><button onclick="mv(${i},-1)">↑</button> <button onclick="mv(${i},1)">↓</button> <button onclick="S.splice(${i},1);tbl();build()">✕</button></td></tr>`).join('');
+}
+function mv(i,d){const j=i+d;if(j<0||j>=S.length)return;[S[i],S[j]]=[S[j],S[i]];tbl();build()}
+function addI(t){
+ const d=lastD;let it;
+ if(t==='pipe')it=pipe(d,3);else if(t==='tee')it=tee(d);else if(t==='spr')it={t:'spr',d:'½',u:'up'};
+ else if(t==='red')it=red(d,KEYS[Math.min(KEYS.indexOf(d)+1,KEYS.length-1)]);
+ else it=elb(d,(lastDk==='py'||lastDk==='ny')?'px':'py');
+ S.push(it);tbl();build();
+}
+function resetDef(){S=DEF();tbl();build();fit(V(1,1,1))}
+tbl();build();fit(V(1,1,1));
+</script>
+</body>
+</html>
